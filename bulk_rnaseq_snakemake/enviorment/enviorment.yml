@@ -1,0 +1,36 @@
+name: bulk-rnaseq
+
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+
+dependencies:
+  # Workflow management
+  - snakemake
+
+  # Python
+  - python=3.11
+  - pandas
+
+  # Quality control
+  - fastqc
+  - fastp
+  - multiqc
+
+  # Alignment
+  - hisat2
+
+  # BAM processing
+  - samtools
+
+  # Read counting
+  - subread
+
+#deseq2
+ - R = 4.3.3
+-ggplot2
+-ggrepel
+-clusterprofiler
+-enrichplot
+-org.Mm.eg.db

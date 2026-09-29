@@ -1,0 +1,234 @@
+with open("accession_list.txt") as f:
+    SAMPLES = [line.strip() for line in f if line.strip()]
+
+
+rule all:
+    input:
+        ############Raw FastQC
+        expand(
+            "results/fastqc/{sample}_1_fastqc.html",
+            sample=SAMPLES
+        ),
+        expand(
+            "results/fastqc/{sample}_2_fastqc.html",
+            sample=SAMPLES
+        ),
+
+        ############ Trimmed FASTQ
+        expand(
+            "results/trimmed/{sample}_1_trimmed.fastq.gz",
+            sample=SAMPLES
+        ),
+        expand(
+            "results/trimmed/{sample}_2_trimmed.fastq.gz",
+            sample=SAMPLES
+        ),
+
+        ############ fastp reports
+        expand(
+            "results/trimmed/{sample}_fastp.html",
+            sample=SAMPLES
+        ),
+        expand(
+            "results/trimmed/{sample}_fastp.json",
+            sample=SAMPLES
+        ),
+
+        ############### Trimmed FastQC AGAIN
+        expand(
+            "results/fastqc/{sample}_trimmed_1_fastqc.html",
+            sample=SAMPLES
+        ),
+        expand(
+            "results/fastqc/{sample}_trimmed_2_fastqc.html",
+            sample=SAMPLES
+        ),
+
+        ##########MultiQC
+        "results/multiqc/trimmed_multiqc_report.html",
+
+        # Alignment
+        expand(
+            "results/aligned/{sample}.sorted.bam",
+            sample=SAMPLES
+        ),
+
+        # FeatureCounts
+        expand(
+            "results/counts/{sample}.txt",
+            sample=SAMPLES
+        ),
+
+        # Combined count matrix
+        "results/counts_matrix.csv"
+
+
+rule fastqc:
+    input:
+        r1="data/fastq/{sample}_1.fastq.gz",
+        r2="data/fastq/{sample}_2.fastq.gz"
+
+    output:
+        html1="results/fastqc/{sample}_1_fastqc.html",
+        zip1="results/fastqc/{sample}_1_fastqc.zip",
+        html2="results/fastqc/{sample}_2_fastqc.html",
+        zip2="results/fastqc/{sample}_2_fastqc.zip"
+
+    threads: 4
+
+    shell:
+        """
+        mkdir -p results/fastqc
+
+        fastqc \
+            -t {threads} \
+            {input.r1} \
+            {input.r2} \
+            --outdir results/fastqc
+        """
+
+
+rule fastp:
+    input:
+        r1="data/fastq/{sample}_1.fastq.gz",
+        r2="data/fastq/{sample}_2.fastq.gz"
+
+    output:
+        r1="results/trimmed/{sample}_1_trimmed.fastq.gz",
+        r2="results/trimmed/{sample}_2_trimmed.fastq.gz",
+        html="results/trimmed/{sample}_fastp.html",
+        json="results/trimmed/{sample}_fastp.json"
+
+    threads: 4
+
+    shell:
+        """
+        mkdir -p results/trimmed
+
+        fastp \
+            -i {input.r1} \
+            -I {input.r2} \
+            -o {output.r1} \
+            -O {output.r2} \
+            -w {threads} \
+            -h {output.html} \
+            -j {output.json}
+        """
+
+
+rule fastqc_trimmed:
+    input:
+        r1="results/trimmed/{sample}_1_trimmed.fastq.gz",
+        r2="results/trimmed/{sample}_2_trimmed.fastq.gz"
+
+    output:
+        html1="results/fastqc/{sample}_trimmed_1_fastqc.html",
+        zip1="results/fastqc/{sample}_trimmed_1_fastqc.zip",
+        html2="results/fastqc/{sample}_trimmed_2_fastqc.html",
+        zip2="results/fastqc/{sample}_trimmed_2_fastqc.zip"
+
+    threads: 4
+
+    shell:
+        """
+        mkdir -p results/fastqc
+
+        fastqc \
+            -t {threads} \
+            {input.r1} \
+            {input.r2} \
+            --outdir results/fastqc
+        """
+
+
+rule multiqc_trimmed:
+    input:
+        expand(
+            "results/fastqc/{sample}_trimmed_1_fastqc.zip",
+            sample=SAMPLES
+        ),
+        expand(
+            "results/fastqc/{sample}_trimmed_2_fastqc.zip",
+            sample=SAMPLES
+        )
+
+    output:
+        "results/multiqc/trimmed_multiqc_report.html"
+
+    shell:
+        """
+        mkdir -p results/multiqc
+
+        multiqc \
+            results/fastqc \
+            -o results/multiqc \
+            -n trimmed_multiqc_report.html
+        """
+
+
+rule hisat2_align:
+    input:
+        r1="results/trimmed/{sample}_1_trimmed.fastq.gz",
+        r2="results/trimmed/{sample}_2_trimmed.fastq.gz"
+
+    output:
+        bam="results/aligned/{sample}.sorted.bam"
+
+    threads: 4
+
+    shell:
+        """
+        mkdir -p results/aligned
+
+        hisat2 \
+            -p {threads} \
+            -x reference/hisat2_index/grcm39 \
+            -1 {input.r1} \
+            -2 {input.r2} \
+        | samtools sort \
+            -@ {threads} \
+            -o {output.bam}
+
+        samtools index {output.bam}
+        """
+
+
+rule featurecounts:
+    input:
+        bam="results/aligned/{sample}.sorted.bam",
+        gtf="reference/Mus_musculus.GRCm39.116.gtf"
+
+    output:
+        counts="results/counts/{sample}.txt"
+
+    threads: 4
+
+    shell:
+        """
+        mkdir -p results/counts
+
+        featureCounts \
+            -T {threads} \
+            -p \
+            -t exon \
+            -g gene_id \
+            -a {input.gtf} \
+            -o {output.counts} \
+            {input.bam}
+        """
+
+
+rule combine_counts:
+    input:
+        expand(
+            "results/counts/{sample}.txt",
+            sample=SAMPLES
+        )
+
+    output:
+        "config/counts_matrix.csv"
+
+    shell:
+        """
+        python3 scripts/combine_counts.py
+        """
